@@ -33,7 +33,7 @@ my $global_cfg = get_global_cfg;
 my $cfg = get_cfg($item, $global_cfg);
 #my $d = new Data::Dumper([$cfg]);
 #print $d->Dump;
-my $datestring = get_datestring($days); # YYYY-MM-DD
+my ($datestring, $wday) = get_datestring($days); # YYYY-MM-DD
 
 
 verify_dir $cfg->{savepath};
@@ -173,25 +173,32 @@ if ($cfg->{type} eq "gif") {
 
 sub do_json {
     my $text = shift;
+    my $output = '';
+
+    if ($text =~ /\n=== Upcoming Events (.*?)\n=/s) {
+	$text = $1;
+	
+    }
+
     unless ($text =~ /\n=== Recurring Events (.*?)\n=/s) {
 	print "Couldn't find content\n";
 	return;
     }
     $text = $1;
     my @wname = qw(Sunday Monday Tuesday Wednesday Thursday Friday Saturday);
-    my (undef, undef, undef, undef, undef, undef, $wday) = localtime(time);
-
     unless ($text =~ /\n\* '''$wname[$wday]'''(.*?)(\n\* |$)/s) {
 	print "Couldn't find content\n";
 	return;
     }
     $text = $1;
-    my $output = '';
-    while ($text =~ /\n\*\* ([^\n]+)(.*)$/s) {
+    while ($text =~ /\n\*\* ?([^\n]+)(.*)$/s) {
 	my $event = $1;
 	$text = $2;
-	if ($event =~ /^'*(\d{1,2}:\d{2}).*?\[\[(.*?)\]\]/) {
-	    $output .= "$1 $2 ";
+	if ($event =~ /^'*(\d{1,2}:\d{2}).*?\[((\[(.*?)\])|([^\]]+))\]/) {
+	    $output .= "$1 ";
+	    if ($4) {$output .= $4;}
+	    if ($5) {$output .= $5;}
+	    $output .= " ";
 	}
     }
 
@@ -256,7 +263,8 @@ sub get_datestring {
     my (undef, undef, undef, $mday, $month, $year, $wday) = localtime($time);
     $year += 1900;
     $month += 1;
-    return sprintf "%.4d-%.2d-%.2d", $year, $month, $mday;
+    return ((sprintf "%.4d-%.2d-%.2d", $year, $month, $mday),
+	    $wday);
 }
 
 sub verify_dir {
