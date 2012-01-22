@@ -1,0 +1,453 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+use LWP::UserAgent;
+use HTTP::Request;
+use JSON;
+use Data::Dumper;
+use FindBin;    
+use lib $FindBin::Bin;
+use PollProxy;
+# use Crypt::SSLeay;
+# if Crypt::SSLeay is not installed we get runtime errors on https sites
+
+my $mkrss = "$FindBin::Bin/makerss"; # generate RSS document
+# make sure it's compiled with jpeg if you support JPEG
+my $IDENTIFY = 'identify'; # ImageMagick tool to detect corruption
+# should check if this is in path
+
+sub image_is_good;
+sub get_cfg;
+sub get_datestring;
+sub get_month;
+sub verify_dir;
+
+$|++; # unbuffer stdout
+
+my $item = shift @ARGV || die "Usage: $0 feed [days]";
+my $days = shift @ARGV;
+my $cfg = get_cfg($item);
+#my $d = new Data::Dumper([$cfg]);
+#print $d->Dump;
+my $datestring = get_datestring($days); # YYYY-MM-DD
+
+
+verify_dir $cfg->{savepath};
+
+my $savepath = $cfg->{savepath}.'/'.$cfg->{subdir};
+verify_dir $savepath;
+my $cache = $savepath.'/'.$item.'-cache';
+$savepath .= "/$item";
+verify_dir $savepath;
+
+my $extfile;
+if ($cfg->{ext}) {
+    verify_dir "$cfg->{savepath}/$cfg->{ext}";
+    verify_dir "$cfg->{savepath}/$cfg->{ext}/$item";
+    $extfile = "$cfg->{savepath}/$cfg->{ext}/$item/$datestring"
+}
+
+my $savefile = $savepath.'/'.$datestring.'.'.$cfg->{type};
+if (-f $savefile) {
+    print "Already downloaded $savefile.\n";
+    exit; # already done
+}
+
+# If $cfg->{date} is set, add date to URL
+# XXX: $cfg->{date} should probably be the date format as in strftime
+if ($cfg->{date}) {
+    my $url_date = $datestring;
+    $url_date =~ s{-}{/}g;
+    $cfg->{url} .= $url_date;
+}
+
+if ($cfg->{type} eq "wiki") {
+    my $month = get_month;
+    my $year =  1900 + (localtime(time))[5] - 100; # 100 years ago
+    verify_dir $cache;
+    $cache .= '/'.$month.'_'.$year;
+    if (-f $cache) {
+	my $page_content;
+	open (F, "<$cache") or die "Can't open cache [$cache]: $!";
+	{ local $/; $page_content = <F>; close F; } #slurp
+	do_wiki($page_content);
+	unless ($days) { # don't do it when fetching old archives
+	    exec ($mkrss, $item);
+	}
+	exit;
+    }
+    $cfg->{url} .= $month.'_'.$year;
+}
+
+if ($cfg->{type} eq "jpg") {
+    $cfg->{url} .= "&s=int&adv=1&z=m&ct=0&page=1";
+}
+
+my $seenfile
+    = ($cfg->{type} eq "text")
+    ? $ENV{HOME}."/svn/pollrss/seen.txt" # XXX legacy
+    : $FindBin::Bin.'/seen/'.$cfg->{name};
+
+print "$savefile\n";
+print "$cfg->{url}\n";
+
+# START: move me to PollProxy constructor
+my $ua = LWP::UserAgent->new;
+
+# Cookies are so we can tell flickr to talk to us in English
+use HTTP::Cookies;
+#my $cookie_jar = HTTP::Cookies->new(file=>"/tmp/cookies.txt", autosave=>1); 
+my $cookie_jar = HTTP::Cookies->new;
+my $three_years = time()+3*int(3.141592*10**9/100); # pi seconds = nanocentury
+$cookie_jar->set_cookie(0, "cookie_l10n", "en-us%3Bus", "/", ".flickr.com",
+undef, 1, "", $three_years, "", {});
+    # $port, $path_spec, $secure, $maxage, $discard, \%rest )
+# Got these values from running HTTP::Cookies->scan()
+$ua->cookie_jar($cookie_jar);
+
+# randomize timeouts to appear less bot-like; probably doesn't really help
+$ua->timeout(10+int(rand(20)));
+# I just picked this agent string to look like a real browser
+$ua->agent('Mozilla/4.0 '
+	   . '(compatible; MSIE 7.0; Windows NT 5.1; .NET CLR 2.0.50727)');
+
+if ($PollProxy::CURRENT_PROXY = $ENV{CURRENT_PROXY}) {
+    PollProxy::proxy($ua, $PollProxy::CURRENT_PROXY);
+}
+# END: PollProxy constructor
+
+my $res = PollProxy::fetch($ua, $cfg->{url});
+unless ($res->is_success) {
+    die "Couldn't fetch URL because: [".$res->status_line."], URL: [$cfg->{url}]";
+}
+my $content = $res->content;
+
+# Giant 4-way if:
+#  "gif": comics
+#  "text": mailing list
+#  "jpg": photos
+#  "wiki": Wikipedia calendar
+
+sub do_gif;
+sub do_text;
+sub do_jpg;
+
+sub just_save;
+
+if ($cfg->{type} eq "gif") {
+  if ($res->content_type eq "image/gif") {
+    just_save($content);
+  } else {
+    do_gif($content);
+  }
+} elsif ($cfg->{type} eq "text") {
+  do_text($content);
+} elsif ($cfg->{type} eq "jpg") {
+  do_jpg($content);
+} elsif ($cfg->{type} eq "wiki") { 
+    if (open (F, ">$cache")) {
+	print F $content;
+	close F;
+    } else {
+	print STDERR "Couldn't write [$cache]: $!\n";
+    }
+    do_wiki($content);
+}
+
+if (($cfg->{type} eq "gif") and (not image_is_good($savefile))) {
+    unlink($savefile);
+    PollProxy::markBad("Image was bad (gif)"); # XXX really a proxy problem?
+    die "Corrupt image.";
+}
+
+unless ($days) { # don't do it when fetching old archives
+    exec ($mkrss, $item);
+}
+exit;
+
+sub image_is_good {
+    my $image = shift;
+    
+    my $ret = system($IDENTIFY, $image);
+    if ($ret >> 8) { # error: corrupt image
+	return 0;
+    }
+    return 1;
+}
+
+sub get_cfg {
+    my $item = shift;
+    open (I, $FindBin::Bin.'/items/'.$item) or die $!;
+    local $/;
+    my $json_text = <I>;
+    close I;
+    my $json = new JSON;
+    return $json->decode($json_text);
+}
+
+# YYYY-MM-DD
+sub get_datestring {
+    my $days = shift;
+    my $time = time;
+    if ($days) {
+	$time -= $days*(60*60*24); # $seconds_per_day
+    }
+    my (undef, undef, undef, $mday, $month, $year, $wday) = localtime($time);
+    $year += 1900;
+    $month += 1;
+    return sprintf "%.4d-%.2d-%.2d", $year, $month, $mday;
+}
+
+sub verify_dir {
+    my $dir = shift;
+    return if (-d $dir);
+    mkdir $dir or die $!."($dir)";
+    chmod 0755, $dir or die $!;
+}
+
+# Got these values from running HTTP::Cookies->scan()
+#$cookie_jar->scan(sub {
+# my $count = 0;
+# foreach (@_) {
+#   print $count++ . ": ";
+#   if (defined($_)) {
+#     print "[$_]\n";
+#   } else { 
+#     print "[undefined]\n";
+#  }
+# }
+#});
+
+
+
+# Look for the URL...
+    
+# START: Move this to a content processing module
+# module should take content as input and return a URL
+
+sub do_gif {
+    my $content = shift;
+    my $gif;
+    if (index($content, $cfg->{url}) < $[) { # URL should appear in the page body
+	# either there is no image for this day, or it has not yet been posted
+	my $dump = "/tmp/out-$$.html";
+	open F, ">$dump" or die $!;
+	print F $content;
+	close F;
+	die "Could not find !$cfg->{url}!";
+    }
+    if ($content =~ m{(http://[\w\./]+?\?width=[\.0-9]+)}) {
+	$gif = $1;
+    } elsif ($content =~ m!(http://[\w\./]+[a-f0-9]{32}).*No Zoom!s) {
+	$gif = $1; # oh well
+    } else {
+	print STDERR "Couldn't find zoomed gif.\n";
+	my $dump = "/tmp/out-$$.html";
+	open F, ">$dump" or die $!;
+	print F $content;
+	close F;
+	PollProxy::markBad("Invalid page content (gif)"); # XXX proxy problem?
+	die "Saved content as $dump";
+    }
+# END: move this to a content processing module
+
+    my $res = PollProxy::fetch($ua, $gif);
+# Often the last status is 500 read timeout or somesuch
+    unless ($res->is_success) {
+	die "$gif: " . $res->status_line;
+    }
+    just_save($res->content);
+}
+
+sub just_save {
+    my $content = shift;
+    open F, ">$savefile" or die $!;
+    print F $content;
+    close F;
+}
+
+sub get_month {
+    my @months = qw(January February March April May June July August September
+                    October November December);
+    my @date = localtime(time);
+    return $months[$date[4]];
+}
+
+sub do_wiki {
+    my $content = shift;
+    my $mday = (localtime(time))[3];
+    my $month = get_month;
+    my $title = sprintf 'title="%s %d">%s %d</a>', $month, $mday, $month, $mday;
+    $content = substr($content, index($content, $title));
+    if ($content =~ m!(<ul>.*?</ul>)!s) {
+	open (F, ">$savefile") or die $!;
+	print F $1;
+	close F;
+    } else {
+	print STDERR "Bad wiki: $content";
+    }
+}
+
+sub do_text {
+    my $content = shift;
+
+    if ($content =~ /half-life = 1 day(.+?)half-life = 1 month/s) {
+	$content = $1;
+    } else {
+	print STDERR "Didn't find half-life";
+	my $dump = "/tmp/out-$$.html";
+	open F, ">$dump" or die $!;
+	print F $content;
+	close F;
+	PollProxy::markBad("Invalid page content (text)"); # XXX proxy problem?
+	die "Saved content as $dump";
+    }
+    my %seen;
+    if (open S, $seenfile) {
+	while (<S>) {
+	    chomp;
+	    $seen{$_} = 1;
+	}
+	close S;
+    }
+    my $found_new = 0;
+    while ($content =~ m!<a href="/lkml/(\d+/\d+/\d+/\d+)"(.+)$!s) {
+	my $link = $1;
+	$content = $2;
+	next if ($seen{$link});
+	# unseen link
+	my $url = "http://lkml.org/lkml/$link";
+	my $res = PollProxy::fetch($ua, $url);
+	if ($res->is_success) {
+	    # XXX We should confirm this is really a valid message before
+	    # we mark it as seen, something like image_is_good()
+	    open S, ">>$seenfile" or die $!;
+	    print S "$link\n";
+	    close S;
+	    $found_new = 1;
+	    open F, ">$savefile" or die $!;
+	    print F $res->content;
+	    close F;
+	    last;
+	} else {
+	    die "Couldn't fetch $link";
+	}
+    }
+    unless ($found_new) { die "Didn't find any new text"; }
+}
+
+
+#     my $search = "http://site.example/search/";
+#     my $options = join ("&", (
+# 			      'q=girl+glasses', # query
+# 			      'm=tags', # search tags
+# 			      'ss=2', # no safe search
+# 			      'ct=0', # content type photos, no screenshots
+# 			      'mt=photos', # mediatype photos, no movies
+# 			      'adv=1', # advanced query
+# 			      's=int' # sort by most interesting
+# 			      ));
+sub do_jpg {
+    my $content = shift;
+    my %seen = ();
+    if (open S, $seenfile) {
+	my $count = 0;
+	while (<S>) {
+	    chomp;
+	    $seen{$_} = 1;
+#	print ++$count . " ";
+	}
+#    print "\n";
+	close S;
+#    print 1+($#{@{%seen}})/2 . " seen.\n";
+    }
+
+    my $found_new = 0;
+    my $found_any = 0;
+    open O, ">/tmp/content.html" or die $!; # XXX warn not die?
+    print O $content;
+    close O;
+
+    my $count = 0;
+    my $total = 0;
+    if ($content =~ /\((\d+) results\)/) {
+	$total = $1;
+    }
+    while ($content =~ m!<span class="photo_container pc_m"><a href="/(photos/[^/"]+/\d+)/" title="([^"]+)"><img src="(http://.+?jpg)"(.+)$!s) {
+        my $link = $1;
+	my $title = $2;
+	my $url = $3;
+	$content = $4;
+
+#	print "\n$link\n$title\n$url\n\n";
+	$found_any = 1;
+	++$count;
+	next if ($seen{$link});
+
+	# found a previously unseen link
+	my $res = PollProxy::fetch($ua, $url);
+
+	unless ($res->is_success) {
+	    # We opt not to keep trying new images here.  There may be a
+	    # problem with the proxy or the site, so we just try again in
+	    # an hour.
+	    die "Couldn't fetch $link";
+	}
+
+	open F, ">$savefile" or die $!;
+	print F $res->content;
+	close F;
+	unless (image_is_good($savefile)) {
+	    PollProxy::markBad("Image was bad (jpg)"); # XXX proxy problem?
+	    die "Bad photo $savefile";
+	}
+
+	my $json = new JSON;
+	open F, ">$extfile" or die $!;
+        my $author = "";
+        if ($title =~ /^(.+) by (.+?)$/) {
+          $title = $1;
+          $author = $2;              
+        }
+
+	my $host = '';
+	if ($cfg->{url} =~ m!^(http://.*?/)!) {
+	    $host = $1;
+	}
+
+
+	print F	$json->encode({ title => $title,
+                                author => $author,
+				link => $host.$link,
+			      total => $total,
+			      count => $count});
+
+	close F;
+
+	open S, ">>$seenfile" or die $!;
+	print S "$link\n";
+	close S;
+
+	$seen{$link} = 1; # don't really need to since we're done
+	$found_new = 1;
+	last;
+    }
+    if ($found_new) {
+      return; # OK
+    } elsif ($found_any) {
+      my $page = "page=";
+      ($cfg->{url} =~ s/$page(\d+)$/$page.(1+$1)/e)
+	or die "Couldn't turn page $cfg->{url}"; # next page
+      my $res = PollProxy::fetch($ua, $cfg->{url});
+      unless ($res->is_success) {
+	    die "Couldn't fetch URL because: [$res->status_line],"
+		. " URL: [$cfg->{url}]";
+      }
+      print "Turning page...\n";
+      return do_jpg($res->content);
+    } else {
+      die "Didn't find a photo of $cfg->{name}";
+    }
+}

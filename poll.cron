@@ -1,0 +1,3 @@
+#Mins  Hours  Days   Months  Day of the week
+45	*	*	*	*	$HOME/git/Trident/pollfor lkhot >>/tmp/lkhot.$USER.out 2>>/tmp/lkhot.$USER.err
+15	*	*	*	*	$HOME/git/Trident/pollfor 100 >>/tmp/100.$USER.out 2>>/tmp/100.$USER.err

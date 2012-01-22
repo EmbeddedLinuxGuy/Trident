@@ -1,0 +1,274 @@
+#!/usr/bin/perl
+
+# TODO
+#
+# 2. For type .jpg if there is no title, we still need to provide
+# a link to the source page.
+#
+# 3. .text (Lkhot) should link to lkml.org page, not local .text file.
+#
+# 1. We should not publish "Somebody, Something" when we fail to parse .text
+# items (Lkhot).  Instead we should quit so we can retry later, and email
+# a message to the administrator.
+#
+# DONE
+# 
+# 0. Validated the RSS.
+#
+# Note: Google Reader has caching issues in that we cannot retract an item
+# once we've published it.  Even after we delete the feed and re-add it,
+# it still remembers old items which aren't in the XML anymore.
+
+use strict;
+use warnings;
+
+use POSIX;
+use FindBin;
+use JSON;
+use CGI;
+
+sub start; # channel, datestring=now format: Tue, 23 Dec 2008 04:00:00 GMT
+sub item; # channel, date=then format: YYYY-MM-DD
+sub end;
+
+sub getName;
+sub getLink;
+sub date2str;
+
+# XXX duplicate code from pollfor
+sub get_cfg;
+sub verify_dir;
+
+my $DAYS = 30; # maximum, only matters if > $DAYS items are stored
+my $channel = shift @ARGV || die;
+my $cfg = get_cfg($channel);
+my $feeds = $cfg->{savepath};
+verify_dir $feeds;
+my $urlbase = $cfg->{urlbase};
+
+my $rss = "$feeds/rss/$channel.xml";
+my $content_dir = "$feeds/$cfg->{subdir}/$channel";
+my $ext_dir = $cfg->{ext}? "$feeds/$cfg->{ext}/$channel" : "";
+
+verify_dir $content_dir;
+opendir(D, $content_dir) or die $!;
+# reverse date order
+my @files = sort {$b cmp $a}
+            grep {$_ ne '.' and $_ ne '..' and $_ !~ /~$/}
+            readdir(D);
+closedir(D);
+if (1+$#files < $DAYS) { $DAYS = 1+$#files; }
+open R, ">$rss" or die "$!: $rss";
+
+my @month_name = qw(Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec);
+my @day_name = qw(Sun Mon Tue Wed Thu Fri Sat);
+my ($sec, $min, $hour, $mday, $mon, $year, $wday) = gmtime;
+my $nowstring = sprintf "%s, %.2d %s %.4d %.2d:%.2d:%.2d GMT",
+    $day_name[$wday], $mday, $month_name[$mon], $year+1900, $hour, $min, $sec;
+#print $nowstring."\n"; exit;
+start ($channel, $nowstring);
+for my $i (0 .. $DAYS-1) {
+    if ($files[$i] =~ /^((\d{4})-(\d{2})-(\d{2})).$cfg->{type}$/) {
+	my ($date, $year, $month, $mday) = ($1, $2, $3, $4);
+	item ($channel, $date, date2str($year, $month-1, $mday));
+    } else {
+	die "Invalid filename: " . $files[$i];
+    }
+}
+end;
+close R;
+
+# YOU KNOW this would be a lot EASIER if I could just use STRFTIME
+# But they seem to be ALMOST RFC822 but not QUITE: NO COMMA!!
+sub date2str {
+    my ($year, $month, $mday) = @_;
+    my $then = POSIX::mktime(0, 0, 11, $mday, $month, $year-1900); # 11am
+    unless ($then) { die "WTF?" }
+    my ($gsec, $gmin, $ghour, $gmday, $gmon, $gyear, $gwday) = gmtime($then);
+
+    my $nowstring = sprintf "%s, %.2d %s %.4d %.2d:%.2d:%.2d GMT",
+    $day_name[$gwday], $gmday, $month_name[$gmon], $gyear+1900, $ghour, $gmin, $gsec;
+    return $nowstring;
+}
+
+sub start {
+    my $channel = shift;
+    my $datestring = shift;
+
+    my $channel_name = getName($channel);
+    my $channel_link = getLink($channel);
+
+    print R qq|<?xml version="1.0"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>$channel_name</title>
+    <link>$channel_link</link>
+    <description>$channel_name</description>
+    <language>en-us</language>
+    <pubDate>$datestring</pubDate>
+    <lastBuildDate>$datestring</lastBuildDate>
+    <docs>http://cyber.law.harvard.edu/rss/rss.html</docs>
+    <generator>mkrss</generator>
+    <managingEditor>$channel\@mailinator.com ($channel)</managingEditor>
+    <webMaster>$channel\@mailinator.com ($channel)</webMaster>
+    <ttl>5</ttl>
+    <atom:link href="http://modernhacker.com/feeds/rss/$channel.xml" rel="self" type="application/rss+xml" />
+|;
+# Bleh... textinput is "ignored by most readers and aggregators"
+#     <textinput>
+#       <title>Commentary</title>
+#       <description>Submit your commentary on $channel_name</description>
+#       <name>responseText</name>
+#       <link>http://www.site.example/cgi-bin/test</link>
+#     </textinput>
+}
+
+sub end {
+    print R qq|</channel>
+</rss>
+|;
+}
+
+sub item {
+    my $channel = shift;
+    my $date = shift;
+    my $datestring = shift;
+
+    my $url = "$urlbase/$channel/$date.$cfg->{type}";
+
+    my $count = 0;
+    my $total = 0;
+
+    print R qq|
+    <item>
+|;
+    if ($cfg->{type} eq "gif") {
+	print R qq|
+      <title>$date</title>
+      <link>$url</link>
+      <description>
+        &lt;img src="$url" /&gt;
+|;
+    } elsif ($cfg->{type} eq "jpg") {
+#	print "Date is $date\n";
+	my ($title, $link, $author);
+	if (open F, "$ext_dir/$date") { # or die "$ext_dir/$date: $!";
+	    my $content; {local $/; $content = <F>}
+	    close F;
+	    my $json = new JSON;
+	    # XXX decode NEEDS to be in an eval or it dies
+	    my $ext = $json->decode($content);
+	    $title = $ext->{title};
+	    $link = $ext->{link};
+	    $author = $ext->{author};
+	    $count = $ext->{count};
+	    $total = $ext->{total};
+	} else {
+	    $title = "Title";
+	    $link = "Link";
+	}
+
+# XXX. I want the <title> to link to the <link> but it doesn't. It seems to
+# link to the <guid> $url instead.
+
+	print R qq|
+      <title>$title</title>
+      <link>$link</link>
+      <description>
+|;
+        print R qq|
+        &lt;img src="$url" /&gt;
+|;
+        if ($author) {
+         print R qq|
+         &lt;br /&gt;by &lt;a href="$link" &gt;$author&lt;/a&gt; &lt;br /&gt;
+|;
+        }
+	if ($count) {
+	    print R qq|$count/$total|;
+	}
+     } elsif($cfg->{type} eq "text") {
+	open F, "$content_dir/$date.$cfg->{type}" or die $!;
+	my $content; {local $/; $content = <F>}
+	close F;
+	my $date = "Sometime";
+	if ($content =~ m!Date</td><td.*?>(.*?)<!s) {
+	    $date = $1;
+	} else {
+	    print STDERR "Couldn't find Date\n";
+	}
+	my $from = "Somebody";
+	if ($content =~ m!From</td><td.*?>(.*?)<!s) {
+	    $from = $1;
+	    $from =~ s/\s*&lt;&gt;\s*$//;
+	} else {
+	    print STDERR "Couldn't find author\n";
+	}
+	my $subject = "Something";
+	if ($content =~ m!Subject</td><td.*?>(.*?)<!s) {
+	    $subject = $1;
+	} else {
+	    print STDERR "Couldn't find Subject";
+	}
+	    
+	print R qq|
+      <title>$from, $subject</title>
+      <link>$url</link>
+      <description>
+      Sent $date&lt;br /&gt;
+|;
+	if ($content =~ m!(<pre.*?>.+</pre>)!s) {
+	    print R CGI::escapeHTML($1);
+        } else {
+	    print R "Sorry, couldn't understand this message.";
+	    print STDERR "Problem with today's message.\n";
+	}
+     } elsif ($cfg->{type} eq "wiki") {
+	 open F, "$content_dir/$date.$cfg->{type}" or die $!;
+	 my $content; {local $/; $content = <F>}
+	 close F;
+	 $date =~ s/^20/19/;
+	 print R qq|<title>$date</title><description>|.CGI::escapeHTML($content);
+     }
+    print R qq|
+      </description>
+      <pubDate>$datestring</pubDate>
+      <guid>$url</guid>
+    </item>
+|;
+#	  <form action="blah" method="post">Do you want me?
+#          <input type="text" name="bleh" />
+#	  <input type="submit">
+#	  </form>
+}
+
+sub getName {
+    my $name = shift;
+    $name =~ s/^(\w)/uc($1)/e;
+    $name =~ s/_(\w)/' '.uc($1)/eg;
+    return $name;
+}
+
+sub getLink {
+    my $name = shift;
+    $name =~ s/^(\w)/uc($1)/e;
+    $name =~ s/_(\w)/'_'.uc($1)/eg;
+    return 'http://en.wikipedia.org/wiki/'.$name;
+}
+
+sub get_cfg {
+    my $item = shift;
+    open (I, $FindBin::Bin.'/items/'.$item) or die $!;
+    local $/;
+    my $json_text = <I>;
+    close I;
+    my $json = new JSON;
+    return $json->decode($json_text);
+}
+
+sub verify_dir {
+    my $dir = shift;
+    return if (-d $dir);
+    mkdir $dir or die $!;
+    chmod 0755, $dir or die $!;
+}
