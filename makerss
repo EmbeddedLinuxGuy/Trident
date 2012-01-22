@@ -36,6 +36,7 @@ sub getLink;
 sub date2str;
 
 # XXX duplicate code from pollfor
+sub get_global_cfg;
 sub get_cfg;
 sub verify_dir;
 
@@ -262,9 +263,23 @@ sub getLink {
     return 'http://en.wikipedia.org/wiki/'.$name;
 }
 
+sub get_global_cfg {
+    open (I, $FindBin::Bin.'/trident.cfg') or return undef;
+    my $json_text;
+    { local $/; $json_text = <I>; close I }
+    my $json = new JSON;
+    return $json->decode($json_text);
+}
+
 sub get_cfg {
     my $item = shift;
-    open (I, $FindBin::Bin.'/items/'.$item) or die $!;
+    my $global_cfg = shift;
+
+    unless (open (I, $FindBin::Bin.'/items/'.$item)
+	    or ($global_cfg and $global_cfg->{items}
+		and open (I, $FindBin::Bin.'/'.$global_cfg->{items}.'/'.$item))) {
+	die "No such feed [$item]";
+    }
     local $/;
     my $json_text = <I>;
     close I;
