@@ -1,0 +1,9 @@
+{
+  "name": "lkhot",
+  "url": "http://lkml.org/hot.xml",
+  "savepath": "/var/www/localhost/htdocs/feeds",
+  "urlbase": "http://m\u006fdernh\u0061cker.com/feeds/text",
+  "subdir": "text",
+  "type": "text",
+  "date": false
+}

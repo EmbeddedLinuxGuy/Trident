@@ -1,0 +1,9 @@
+{
+  "name": "100",
+  "url": "http://en.wikipedia.org/wiki/",
+  "savepath": "/var/www/localhost/htdocs/feeds",
+  "urlbase": "http://m\u006fdernh\u0061cker.com/feeds/text",
+  "subdir": "text",
+  "type": "wiki",
+  "date": false
+}
