@@ -229,6 +229,12 @@ sub item {
 	 close F;
 	 $date =~ s/^20/19/;
 	 print R qq|<title>$date</title><description>|.CGI::escapeHTML($content);
+     } elsif ($cfg->{type} eq "json") {
+	 my $file = $content_dir.'/'.$date.$cfg->{type};
+         open F, '<'.$file or die "Can't read [$file]: $!";
+	 my $content; {local $/; $content = <F>}
+	 close F;
+	 print R qq|<title>$date</title><description>|.CGI::escapeHTML($content);
      }
     print R qq|
       </description>

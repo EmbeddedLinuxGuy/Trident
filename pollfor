@@ -65,6 +65,7 @@ if ($cfg->{date}) {
     $cfg->{url} .= $url_date;
 }
 
+# we break the giant "if" because we may want to use cache
 if ($cfg->{type} eq "wiki") {
     my $month = get_month;
     my $year =  1900 + (localtime(time))[5] - 100; # 100 years ago
@@ -126,15 +127,17 @@ unless ($res->is_success) {
 }
 my $content = $res->content;
 
-# Giant 4-way if:
+# Giant n-way if:
 #  "gif": comics
 #  "text": mailing list
 #  "jpg": photos
 #  "wiki": Wikipedia calendar
+#  "json": Noisebridge wiki calendar
 
 sub do_gif;
 sub do_text;
 sub do_jpg;
+sub do_json;
 
 sub just_save;
 
@@ -156,6 +159,21 @@ if ($cfg->{type} eq "gif") {
 	print STDERR "Couldn't write [$cache]: $!\n";
     }
     do_wiki($content);
+} elsif ($cfg->{type} eq "json") {
+    my $json = new JSON;
+    my $tree = $json->decode($content);
+    my $page_id = "3787";
+    my @keys = keys %{$tree->{pages}->{$page_id}->{revisions}->[0]};
+    for my $key (@keys) {
+        do_json($key);
+    }
+}
+
+sub do_json {
+    my $html = shift;
+    open (F, ">$savefile") or die "Can't open [$savefile]: $!";
+    print F $html;
+    close F;
 }
 
 if (($cfg->{type} eq "gif") and (not image_is_good($savefile))) {
