@@ -8,7 +8,7 @@ use HTTP::Request;
 use JSON;
 use Data::Dumper;
 use FindBin;    
-use lib $FindBin::Bin;
+use lib $FindBin::Bin.'/../proxyfun';
 use PollProxy;
 # use Crypt::SSLeay;
 # if Crypt::SSLeay is not installed we get runtime errors on https sites
@@ -118,7 +118,7 @@ if ($PollProxy::CURRENT_PROXY = $ENV{CURRENT_PROXY}) {
 }
 # END: PollProxy constructor
 
-my $res = PollProxy::fetch($ua, $cfg->{url});
+my $res = PollProxy::fetch($ua, $cfg->{url}, $cfg->{proxy});
 unless ($res->is_success) {
     die "Couldn't fetch URL because: [".$res->status_line."], URL: [$cfg->{url}]";
 }
@@ -253,7 +253,7 @@ sub do_gif {
     }
 # END: move this to a content processing module
 
-    my $res = PollProxy::fetch($ua, $gif);
+    my $res = PollProxy::fetch($ua, $gif, $cfg->{proxy});
 # Often the last status is 500 read timeout or somesuch
     unless ($res->is_success) {
 	die "$gif: " . $res->status_line;
@@ -319,7 +319,7 @@ sub do_text {
 	next if ($seen{$link});
 	# unseen link
 	my $url = "http://lkml.org/lkml/$link";
-	my $res = PollProxy::fetch($ua, $url);
+	my $res = PollProxy::fetch($ua, $url, $cfg->{proxy});
 	if ($res->is_success) {
 	    # XXX We should confirm this is really a valid message before
 	    # we mark it as seen, something like image_is_good()
@@ -387,7 +387,7 @@ sub do_jpg {
 	next if ($seen{$link});
 
 	# found a previously unseen link
-	my $res = PollProxy::fetch($ua, $url);
+	my $res = PollProxy::fetch($ua, $url, $cfg->{proxy});
 
 	unless ($res->is_success) {
 	    # We opt not to keep trying new images here.  There may be a
@@ -440,7 +440,7 @@ sub do_jpg {
       my $page = "page=";
       ($cfg->{url} =~ s/$page(\d+)$/$page.(1+$1)/e)
 	or die "Couldn't turn page $cfg->{url}"; # next page
-      my $res = PollProxy::fetch($ua, $cfg->{url});
+      my $res = PollProxy::fetch($ua, $cfg->{url}, $cfg->{proxy});
       unless ($res->is_success) {
 	    die "Couldn't fetch URL because: [$res->status_line],"
 		. " URL: [$cfg->{url}]";

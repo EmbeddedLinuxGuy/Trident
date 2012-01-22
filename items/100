@@ -5,5 +5,6 @@
   "urlbase": "http://m\u006fdernh\u0061cker.com/feeds/text",
   "subdir": "text",
   "type": "wiki",
-  "date": false
+  "date": false,
+  "proxy": "noproxy"
 }
