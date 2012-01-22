@@ -42,7 +42,8 @@ sub verify_dir;
 
 my $DAYS = 30; # maximum, only matters if > $DAYS items are stored
 my $channel = shift @ARGV || die;
-my $cfg = get_cfg($channel);
+my $global_cfg = get_global_cfg;
+my $cfg = get_cfg($channel, $global_cfg);
 my $feeds = $cfg->{savepath};
 verify_dir $feeds;
 my $urlbase = $cfg->{urlbase};
