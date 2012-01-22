@@ -20,6 +20,7 @@ my $IDENTIFY = 'identify'; # ImageMagick tool to detect corruption
 
 sub image_is_good;
 sub get_cfg;
+sub get_global_cfg;
 sub get_datestring;
 sub get_month;
 sub verify_dir;
@@ -28,7 +29,8 @@ $|++; # unbuffer stdout
 
 my $item = shift @ARGV || die "Usage: $0 feed [days]";
 my $days = shift @ARGV;
-my $cfg = get_cfg($item);
+my $global_cfg = get_global_cfg;
+my $cfg = get_cfg($item, $global_cfg);
 #my $d = new Data::Dumper([$cfg]);
 #print $d->Dump;
 my $datestring = get_datestring($days); # YYYY-MM-DD
@@ -177,9 +179,23 @@ sub image_is_good {
     return 1;
 }
 
+sub get_global_cfg {
+    open (I, $FindBin::Bin.'/trident.cfg') or return undef;
+    my $json_text;
+    { local $/; $json_text = <I>; close I }
+    my $json = new JSON;
+    return $json->decode($json_text);
+}
+
 sub get_cfg {
     my $item = shift;
-    open (I, $FindBin::Bin.'/items/'.$item) or die $!;
+    my $global_cfg = shift;
+
+    unless (open (I, $FindBin::Bin.'/items/'.$item)
+	    or ($global_cfg and $global_cfg->{items}
+		and open (I, $FindBin::Bin.'/'.$global_cfg->{items}.'/'.$item))) {
+	die "No such feed [$item]";
+    }
     local $/;
     my $json_text = <I>;
     close I;
