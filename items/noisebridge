@@ -1,6 +1,6 @@
 {
   "name": "noisebridge",
-  "url": "http://wiki.noisebridge.net/api.php?format=json&action=query&titles=Noisebridge&prop=revisions&rvprop=content",
+  "url": "http://wiki.noisebridge.net/api.php?format=json&action=query&titles=Category:Events&prop=revisions&rvprop=content",
   "savepath": "/var/www/localhost/htdocs/feeds",
   "urlbase": "http://m\u006fdernh\u0061cker.com/feeds/text",
   "subdir": "text",

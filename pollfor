@@ -10,7 +10,7 @@ use Data::Dumper;
 use FindBin;    
 use lib $FindBin::Bin.'/../proxyfun';
 use PollProxy;
-# use Crypt::SSLeay;
+use Crypt::SSLeay;
 # if Crypt::SSLeay is not installed we get runtime errors on https sites
 
 my $mkrss = "$FindBin::Bin/makerss"; # generate RSS document
@@ -164,8 +164,10 @@ if ($cfg->{type} eq "gif") {
     my $tree = $json->decode($content);
     #my $d = new Data::Dumper([$tree]);
     #print $d->Dump;
-    my $page_id = "3787";
-    do_json($tree->{query}{pages}->{$page_id}->{revisions}->[0]->{'*'});
+    my $pages = $tree->{query}{pages};
+    for my $page_id (keys %$pages) {
+        do_json($tree->{query}{pages}->{$page_id}->{revisions}->[0]->{'*'});
+    }
 }
 
 sub do_json {
