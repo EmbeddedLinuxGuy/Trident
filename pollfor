@@ -175,9 +175,8 @@ sub do_json {
     my $text = shift;
     my $output = '';
 
-    if ($text =~ /\n=== Upcoming Events (.*?)\n=/s) {
-	$text = $1;
-	
+    if ($text =~ /\n=== Upcoming Events (.*?)(\n=.*)$/s) {
+	$text = $2;
     }
 
     unless ($text =~ /\n=== Recurring Events (.*?)\n=/s) {
