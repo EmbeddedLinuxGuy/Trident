@@ -133,7 +133,7 @@ my $content = $res->content;
 #  "jpg": photos
 #  "wiki": Wikipedia calendar
 #  "json": Noisebridge wiki calendar
-
+# http://noisebridge.net/api.php?format=json&action=parse&page=Category:Events&prop=text
 sub do_gif;
 sub do_text;
 sub do_jpg;
@@ -166,14 +166,38 @@ if ($cfg->{type} eq "gif") {
     #print $d->Dump;
     my $pages = $tree->{query}{pages};
     for my $page_id (keys %$pages) {
+        #print $tree->{query}{pages}->{$page_id}->{revisions}->[0]->{'*'} . "\n";
         do_json($tree->{query}{pages}->{$page_id}->{revisions}->[0]->{'*'});
     }
 }
 
 sub do_json {
-    my $html = shift;
+    my $text = shift;
+    unless ($text =~ /\n=== Recurring Events (.*?)\n=/s) {
+	print "Couldn't find content\n";
+	return;
+    }
+    $text = $1;
+    my @wname = qw(Sunday Monday Tuesday Wednesday Thursday Friday Saturday);
+    my (undef, undef, undef, undef, undef, undef, $wday) = localtime(time);
+
+    unless ($text =~ /\n\* '''$wname[$wday]'''(.*?)(\n\* |$)/s) {
+	print "Couldn't find content\n";
+	return;
+    }
+    $text = $1;
+    my $output = '';
+    while ($text =~ /\n\*\* ([^\n]+)(.*)$/s) {
+	my $event = $1;
+	$text = $2;
+	if ($event =~ /^'*(\d{1,2}:\d{2}).*?\[\[(.*?)\]\]/) {
+	    $output .= "$1 $2 ";
+	}
+    }
+
+    return if ($output eq '');
     open (F, ">$savefile") or die "Can't open [$savefile]: $!";
-    print F $html;
+    print F $output;
     close F;
 }
 
