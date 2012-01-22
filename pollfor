@@ -162,11 +162,10 @@ if ($cfg->{type} eq "gif") {
 } elsif ($cfg->{type} eq "json") {
     my $json = new JSON;
     my $tree = $json->decode($content);
+    #my $d = new Data::Dumper([$tree]);
+    #print $d->Dump;
     my $page_id = "3787";
-    my @keys = keys %{$tree->{pages}->{$page_id}->{revisions}->[0]};
-    for my $key (@keys) {
-        do_json($key);
-    }
+    do_json($tree->{query}{pages}->{$page_id}->{revisions}->[0]->{'*'});
 }
 
 sub do_json {
