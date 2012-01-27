@@ -90,10 +90,9 @@ if ($cfg->{type} eq "jpg") {
     $cfg->{url} .= "&s=int&adv=1&z=m&ct=0&page=1";
 }
 
-my $seenfile
-    = ($cfg->{type} eq "text")
-    ? $ENV{HOME}."/svn/pollrss/seen.txt" # XXX legacy
-    : $FindBin::Bin.'/seen/'.$cfg->{name};
+my $seenfile = $FindBin::Bin.'/../seen-items';
+verify_dir $seenfile;
+$seenfile .= '/'.$cfg->{name};
 
 print "$savefile\n";
 print "$cfg->{url}\n";
