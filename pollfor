@@ -17,6 +17,8 @@ my $mkrss = "$FindBin::Bin/makerss"; # generate RSS document
 # make sure it's compiled with jpeg if you support JPEG
 my $IDENTIFY = 'identify'; # ImageMagick tool to detect corruption
 # should check if this is in path
+#my $bti = $ENV{HOME}.'/git/bti/bti';
+my $bti = '/bin/cat';
 
 sub image_is_good;
 sub get_cfg;
@@ -104,6 +106,7 @@ use HTTP::Cookies;
 #my $cookie_jar = HTTP::Cookies->new(file=>"/tmp/cookies.txt", autosave=>1); 
 my $cookie_jar = HTTP::Cookies->new;
 my $three_years = time()+3*int(3.141592*10**9/100); # pi seconds = nanocentury
+# Move set_cookie() arguments to $cfg->{cookie}
 $cookie_jar->set_cookie(0, "cookie_l10n", "en-us%3Bus", "/", ".flickr.com",
 undef, 1, "", $three_years, "", {});
     # $port, $path_spec, $secure, $maxage, $discard, \%rest )
@@ -120,6 +123,16 @@ if ($PollProxy::CURRENT_PROXY = $ENV{CURRENT_PROXY}) {
     PollProxy::proxy($ua, $PollProxy::CURRENT_PROXY);
 }
 # END: PollProxy constructor
+my $msg;
+
+if (($cfg->{type} eq "json") and $cfg->{cache} and (-f $cache)) {
+    open (F, '<'.$cache) or die "Can't read [$cache]: $!";
+    my $text;
+    { local $/; $text = <F>; close F }
+    $msg = do_json($text);
+    # tweet or mkrss?
+    exit;
+}
 
 my $res = PollProxy::fetch($ua, $cfg->{url}, $cfg->{proxy});
 unless ($res->is_success) {
@@ -167,15 +180,38 @@ if ($cfg->{type} eq "gif") {
     my $pages = $tree->{query}{pages};
     for my $page_id (keys %$pages) {
         #print $tree->{query}{pages}->{$page_id}->{revisions}->[0]->{'*'} . "\n";
-        do_json($tree->{query}{pages}->{$page_id}->{revisions}->[0]->{'*'});
+	my $text = $tree->{query}{pages}->{$page_id}->{revisions}->[0]->{'*'};
+        if ($cfg->{cache}) {
+	    open (F, '>'.$cache) or die "Can't write [$cache]: $!";
+	    print F $text;
+	    close F;
+        }
+        $msg = do_json($text);
     }
 }
+if ($cfg->{tweet}) {
+    open (F, '|'.$bti) or die "Can't run [$bti]: $!";
+    print F $msg;
+    close F;
+}
+
+if (($cfg->{type} eq "gif") and (not image_is_good($savefile))) {
+    unlink($savefile);
+    PollProxy::markBad("Image was bad (gif)"); # XXX really a proxy problem?
+    die "Corrupt image.";
+}
+
+unless ($days) { # don't do it when fetching old archives
+    exec ($mkrss, $item);
+}
+exit;
 
 sub do_json {
     my $text = shift;
     my $output = '';
 
     if ($text =~ /\n=== Upcoming Events (.*?)(\n=.*)$/s) {
+	my $upcoming = $1;
 	$text = $2;
     }
 
@@ -193,30 +229,28 @@ sub do_json {
     while ($text =~ /\n\*\* ?([^\n]+)(.*)$/s) {
 	my $event = $1;
 	$text = $2;
-	if ($event =~ /^'*(\d{1,2}:\d{2}).*?\[((\[(.*?)\])|([^\]]+))\]/) {
-	    $output .= "$1 ";
-	    if ($4) {$output .= $4;}
-	    if ($5) {$output .= $5;}
-	    $output .= " ";
+	if ($event =~ /^'*(\d{1,2}:\d{2})/) {
+	    $output .= " $1";
+	    $event = $'; # trailing part of $event
+	}
+        if ($event =~ /\[\[(.*?)\]\]/) {
+                my $link = $1;
+		if ($link =~ /^(\S*)\|(.*)$/) {
+		    $output .= " $2";
+		} else {
+		    $output .= " $link";
+		}
+        } elsif ($event =~ /\[(.*?)\]/) {
+	    $output .= " $1";
 	}
     }
 
+    my $prefix = substr($wname[$wday], 0, 3);
     return if ($output eq '');
     open (F, ">$savefile") or die "Can't open [$savefile]: $!";
-    print F $output;
+    print F "$prefix$output";
     close F;
 }
-
-if (($cfg->{type} eq "gif") and (not image_is_good($savefile))) {
-    unlink($savefile);
-    PollProxy::markBad("Image was bad (gif)"); # XXX really a proxy problem?
-    die "Corrupt image.";
-}
-
-unless ($days) { # don't do it when fetching old archives
-    exec ($mkrss, $item);
-}
-exit;
 
 sub image_is_good {
     my $image = shift;
