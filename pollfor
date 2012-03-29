@@ -129,7 +129,12 @@ if (($cfg->{type} eq "json") and $cfg->{cache} and (-f $cache)) {
     my $text;
     { local $/; $text = <F>; close F }
     $msg = do_json($text);
-    # tweet or mkrss?
+    if ($cfg->{tweet}) {
+	open (F, '|'.$bti) or die "Can't run [$bti]: $!";
+	print F $msg;
+	close F;
+    }
+    # XXX: mkrss?
     exit;
 }
 
@@ -225,30 +230,61 @@ sub do_json {
 	return;
     }
     $text = $1;
-    while ($text =~ /\n\*\* ?([^\n]+)(.*)$/s) {
+
+    my @what = ();
+    my @when = ();
+    my $now = -1;
+
+    # [event name]
+    while ($text =~ /\n\*\* ?([^\n]+)(.*+)$/s) {
 	my $event = $1;
 	$text = $2;
 	if ($event =~ /^'*(\d{1,2}:\d{2})/) {
-	    $output .= " $1";
+	    if (($now < 0) || ($1 ne $when[$now])) {
+		    ++$now;
+		    $when[$now] = $1;
+		    $what[$now] = '';
+	    }
+	    #$output .= " $1";
 	    $event = $'; # trailing part of $event
-	}
+        } else {
+             if ($now < 0) {
+                 ++$now;
+                 $when[$now] = '';
+                 $what[$now] = '';
+             }     
+        }
+
         if ($event =~ /\[\[(.*?)\]\]/) {
-                my $link = $1;
-		if ($link =~ /^(\S*)\|(.*)$/) {
-		    $output .= " $2";
-		} else {
-		    $output .= " $link";
-		}
-        } elsif ($event =~ /\[(.*?)\]/) {
-	    $output .= " $1";
+            my $link = $1;
+
+            if ($what[$now]) { $what[$now] .= ',' }
+	    if ($link =~ /^(\S*)\|(.*)$/) {
+                $what[$now] .= " $2";
+	    } else {
+	        $what[$now] .= " $link";
+	    }
+         } elsif ($event =~ /\[(.*?)\]/) {
+            if ($what[$now]) { $what[$now] .= ',' }
+	    $what[$now] .= " $1";
 	}
     }
+
+        if ($now >= 0) {
+            $output .= $when[0].$what[0];
+            for my $i (1..$now) {
+              $output .= ' '.$when[$i].$what[$i];
+            }
+        }
+        $output .= "\n";
 
     my $prefix = substr($wname[$wday], 0, 3);
     return if ($output eq '');
     open (F, ">$savefile") or die "Can't open [$savefile]: $!";
-    print F "$prefix$output";
+#    print F "$prefix$output";
+    print F $output;
     close F;
+    return $output;
 }
 
 sub image_is_good {

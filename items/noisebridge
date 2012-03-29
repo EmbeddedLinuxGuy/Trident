@@ -6,5 +6,7 @@
   "subdir": "text",
   "type": "json",
   "date": false,
-  "proxy": "noproxy"
+  "proxy": "noproxy",
+  "tweet": "yes",
+  "cache": "yes"
 }
